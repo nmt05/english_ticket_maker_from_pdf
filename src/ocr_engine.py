@@ -61,7 +61,7 @@ COMMON_WORDS = {
     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
 }
 SAFE_2_LETTER_WORDS = {"is", "am", "be", "do", "go"}
-
+seen_words = set()
 def clean_and_filter_text(raw_text):
     doc = nlp(raw_text)
     filtered_words = []
@@ -75,7 +75,8 @@ def clean_and_filter_text(raw_text):
         clean_word = re.sub(r'[^a-zA-Z]', '', token.text)
         if clean_word:
             lemma_lower = token.lemma_.lower()
-            
+            if lemma_lower in seen_words:
+                continue
             if lemma_lower in COMMON_WORDS:
                 continue
             length = len(clean_word)
@@ -85,7 +86,7 @@ def clean_and_filter_text(raw_text):
                 continue
             if length > 1 and len(set(lemma_lower)) == 1:
                 continue
-
+            seen_words.add(lemma_lower)
             filtered_words.append(clean_word)
             
     return " ".join(filtered_words)
