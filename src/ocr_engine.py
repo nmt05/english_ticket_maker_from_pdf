@@ -61,6 +61,10 @@ COMMON_WORDS = {
     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
 }
 SAFE_2_LETTER_WORDS = {"is", "am", "be", "do", "go"}
+WEB_GARBAGE = {
+        "www", "http", "https", "com", "net", "org", "gov", "edu", "io", "co", "us", "uk", "ca", "de", "fr", "jp",
+        "ebook","html", "htm", "php", "url", "href"
+    }
 seen_words = set()
 def clean_and_filter_text(raw_text):
     doc = nlp(raw_text)
@@ -71,23 +75,21 @@ def clean_and_filter_text(raw_text):
 
         if token.ent_type_ in exclude_entities:
             continue
-        
-        clean_word = re.sub(r'[^a-zA-Z]', '', token.text)
-        if clean_word:
-            lemma_lower = token.lemma_.lower()
-            if lemma_lower in seen_words:
+        word_lemma = token.lemma_.lower()
+        clean_lemma = re.sub(r'[^a-zA-Z]', '', word_lemma)
+        if clean_lemma:
+            
+            if clean_lemma in seen_words:
                 continue
-            if lemma_lower in COMMON_WORDS:
+            if clean_lemma in COMMON_WORDS:
                 continue
-            length = len(clean_word)
-            if length == 1 and lemma_lower not in ['a', 'i']:
+            length = len(clean_lemma)
+            if length < 3 and clean_lemma not in SAFE_2_LETTER_WORDS and clean_lemma not in ["i", "a"]:
                 continue
-            if length == 2 and lemma_lower not in SAFE_2_LETTER_WORDS:
+            if length > 1 and len(set(clean_lemma)) == 1:
                 continue
-            if length > 1 and len(set(lemma_lower)) == 1:
-                continue
-            seen_words.add(lemma_lower)
-            filtered_words.append(clean_word)
+            seen_words.add(clean_lemma)
+            filtered_words.append(clean_lemma)
             
     return " ".join(filtered_words)
 def extract_text_from_pdf(pdf_path,output_file, poppler_path=None):
