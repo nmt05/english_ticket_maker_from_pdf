@@ -7,10 +7,11 @@ from queue import Queue
 import threading
 from spellchecker import SpellChecker
 import time
+from nltk.stem import PorterStemmer
 spell = SpellChecker()
 image_queue = Queue(maxsize=20)
 text_queue = Queue()
-nlp = spacy.load("en_core_web_md")  
+nlp = spacy.load("en_core_web_lg")  
 # src
 current_dir = os.path.dirname(os.path.abspath(__file__))
 # root
@@ -79,7 +80,10 @@ COMMON_WORDS = {
 }
 SAFE_2_LETTER_WORDS = {"is", "am", "be", "do", "go"}
 seen_words = set()
+unknown_words_global = set()
+stemmer = PorterStemmer()
 data_lock = threading.Lock()
+dump_data_lock = threading.Lock()
 
 # =========================
 # THREAD 1: CAPTURE IMAGE
@@ -163,19 +167,24 @@ def clean_and_filter_text(raw_text,local_seen):
         if token.ent_type_ in exclude_entities:
             continue
         word_lemma = token.lemma_.lower()
-        clean_lemma = re.sub(r'^[^a-zA-Z]+|[^a-zA-Z]+$', '', word_lemma)
+        clean_lemma = re.sub(r'^[^a-zA-Z]+|[^a-zA-Z]+$', '', word_lemma)    
         if clean_lemma:
+            
             length = len(clean_lemma)
             if length < 3 and clean_lemma not in SAFE_2_LETTER_WORDS and clean_lemma not in ["i", "a"]:
                 continue
             if clean_lemma in COMMON_WORDS:
                 continue
             if spell.unknown([clean_lemma]):
-                continue
+                if length > 3: # Chỉ lấy từ lỗi "có tâm", bỏ qua rác quá ngắn
+                    with dump_data_lock:
+                        unknown_words_global.add(clean_lemma)
+                continue # Vẫn bỏ qua không cho vào file chính
             with data_lock:
-                if clean_lemma in local_seen:
+                clean_lemma_check = stemmer.stem(clean_lemma)
+                if clean_lemma_check in local_seen:
                     continue
-                local_seen.add(clean_lemma)
+                local_seen.add(clean_lemma_check)
             filtered_words.append(clean_lemma)
             
     return " ".join(filtered_words)
@@ -214,9 +223,17 @@ if __name__ == "__main__":
         # ====== WRITE FILE ======
         with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
             for i, page_num in enumerate(page_nums):
-                f.write(f"--- PAGE {page_num} ---\n")
+                f.write(f"{page_num}\n")
                 f.write(processed[i] + "\n")
+        if unknown_words_global:
+            with open(OUTPUT_PATH, "a", encoding="utf-8") as f:
+                f.write("\n" + "="*30 + "\n")
+                f.write(f"{len(unknown_words_global)} bad case(s):\n")
+                sorted_unknowns = sorted(list(unknown_words_global))
 
+                for i in range(0, len(sorted_unknowns), 10):
+                    line = " ".join(sorted_unknowns[i:i+10])
+                    f.write(line + "\n")
         print("DONE:", OUTPUT_PATH)
 
     else:
