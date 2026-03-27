@@ -4,7 +4,7 @@ import os
 import time
 
 
-client = genai.Client(api_key="AIzaSyCAIS5PPjcB4oJeXYeTTpjydnc-jlxjxKU")
+client = genai.Client(api_key="Your_api_key")
 
 # print("--- Danh sách các Model khả dụng ---")
 # for model in client.models.list():
