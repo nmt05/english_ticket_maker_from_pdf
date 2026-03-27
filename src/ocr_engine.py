@@ -1,9 +1,10 @@
 import pytesseract
 from pdf2image import convert_from_path
 import os
-import re
-import spacy
-nlp = spacy.load("en_core_web_sm")
+
+from concurrent.futures import ProcessPoolExecutor
+
+
 # src
 current_dir = os.path.dirname(os.path.abspath(__file__))
 # root
@@ -15,117 +16,117 @@ tesseract_exe_path = os.path.join(project_root, tesseract_folder_name, "tesserac
 pytesseract.pytesseract.tesseract_cmd = tesseract_exe_path
 
 POPPLER_BIN = os.path.join(project_root, 'poppler', 'Library', 'bin')
-OUTPUT_PATH = os.path.join(project_root, 'output', 'output.txt')
-COMMON_WORDS = {
-    # Pronouns
-    "i", "me", "my", "mine", "myself", "you", "your", "yours", "yourself", "yourselves",
-    "he", "him", "his", "himself", "she", "her", "hers", "herself", "it", "its", "itself",
-    "we", "us", "our", "ours", "ourselves", "they", "them", "their", "theirs", "themselves",
 
-    # Articles & Demonstratives
-    "a", "an", "the", "this", "that", "these", "those",
+def ocr_single_page(page_data):
+    index, image = page_data
 
-    # Conjunctions & Connectors
-    "and", "but", "or", "so", "because", "although", "though", "while", "if",
-    "then", "thus",
-
-    # Verbs: Be, Do, Have, Modals
-    "is", "am", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "having", "do", "does", "did", "doing",
-    "can", "could", "will", "would", "shall", "should", "may", "might", "must",
-
-    # Prepositions
-    "in", "on", "at", "by", "with", "about", "for", "of", "to", "from",
-    "into", "onto", "over", "under",
-    "up", "down", "out", "off",
-
-    # Quantifiers & Adverbs
-    "all", "any", "some", "many", "much", "few", "more", "most", "other", "another",
-    "such", "no", "nor", "not", "only", "own", "same", "than", "too", "very",
-    "quite", "rather", "extremely", "really", "enough", "almost", "nearly", "just", "already",
-    "always", "never", "often", "sometimes", "usually", "rarely", "seldom", "ever",
-
-    # Question Words
-    "what", "which", "who", "whom", "whose", "when", "where", "why", "how",
-
-    # Indefinite Pronouns
-    "someone", "somebody", "something", "anyone", "anybody", "anything",
-    "everyone", "everybody", "everything", "noone", "nobody", "nothing",
-
-
-    "s", "t", "d", "re", "ve", "m", "ll", "etc", "eg", "ie",
-
-    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-    "january", "february", "march", "april", "may", "june", 
-    "july", "august", "september", "october", "november", "december",
-    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
-}
-SAFE_2_LETTER_WORDS = {"is", "am", "be", "do", "go"}
-WEB_GARBAGE = {
-        "www", "http", "https", "com", "net", "org", "gov", "edu", "io", "co", "us", "uk", "ca", "de", "fr", "jp",
-        "ebook","html", "htm", "php", "url", "href"
-    }
-seen_words = set()
-def clean_and_filter_text(raw_text):
-    doc = nlp(raw_text)
-    filtered_words = []
-    exclude_entities = ["PERSON", "GPE", "ORG", "LOC"]
-
-    for token in doc:
-
-        if token.ent_type_ in exclude_entities:
-            continue
-        word_lemma = token.lemma_.lower()
-        clean_lemma = re.sub(r'[^a-zA-Z]', '', word_lemma)
-        if clean_lemma:
-            
-            if clean_lemma in seen_words:
-                continue
-            if clean_lemma in COMMON_WORDS:
-                continue
-            length = len(clean_lemma)
-            if length < 3 and clean_lemma not in SAFE_2_LETTER_WORDS and clean_lemma not in ["i", "a"]:
-                continue
-            if length > 1 and len(set(clean_lemma)) == 1:
-                continue
-            seen_words.add(clean_lemma)
-            filtered_words.append(clean_lemma)
-            
-    return " ".join(filtered_words)
-def extract_text_from_pdf(pdf_path,output_file, poppler_path=None):
     try:
-        images = convert_from_path(pdf_path,dpi = 300, poppler_path=poppler_path)
-        total_pages = len(images)
-        
-        print(f"--- Đang xử lý file: {os.path.basename(pdf_path)} ---")
-        
-        with open(output_file, "w", encoding="utf-8") as f:
-            for i, image in enumerate(images):
-                # OCR trang hiện tại
-                text = pytesseract.image_to_string(image, lang='eng')
-                text = clean_and_filter_text(text)
-
-                # Ghi 
-                f.write(f"\n--- PAGE {i+1} ---\n")
-                f.write(text)
-                f.flush()
-                
-                image.close()
-                
-                print(f"Đã ghi xong trang {i+1}/{total_pages} vào {os.path.basename(output_file)}")
-                
-        return True
+        text = pytesseract.image_to_string(image, lang='eng')
+        image.close() # Giải phóng bộ nhớ ngay sau khi xong
+        return {"page": index + 1, "content": text.strip()}
     except Exception as e:
-        print(f"Lỗi: {e}")
-        return False
+        return {"page": index + 1, "content": f"Lỗi: {str(e)}"}
+
+
+
+
+class OCR_Engine:
+    def __init__(self, poppler_path=POPPLER_BIN):
+        self.poppler_path = poppler_path
+
+
+    def extract_raw_text(self, pdf_path):
+        """
+        Trích xuất văn bản thô từ PDF và giữ nguyên định dạng câu/đoạn.
+        Trả về: Danh sách các dictionary chứa số trang và nội dung.
+        """
+        try:
+            print(f"--- Đang xử lý file: {os.path.basename(pdf_path)} ---")
+            images = convert_from_path(pdf_path, dpi=300, poppler_path=self.poppler_path)
+
+            pages_to_process = list(enumerate(images))
+            
+            if len(pages_to_process) < 10:
+                for i, image in enumerate(images):
+                    # Lấy text thô, không filter để giữ ngữ cảnh câu
+                    text = pytesseract.image_to_string(image, lang='eng')
+                    
+                    extracted_data.append({
+                        "page": i + 1,
+                        "content": text.strip()
+                    })
+                    
+                    image.close()
+                    print(f"Đã xử lý xong trang {i+1}/{len(images)}")
+
+
+            with ProcessPoolExecutor(max_workers=6) as executor:
+                results = list(executor.map(ocr_single_page, pages_to_process))
+            
+            # Sắp xếp lại kết quả theo đúng thứ tự trang (vì chạy song song có thể trả về xáo trộn)
+            extracted_data = sorted(results, key=lambda x: x['page'])
+            
+            print(f"✅ Đã xử lý xong {len(images)} trang.")
+                
+            return extracted_data
+        
+        except Exception as e:
+            print(f"Lỗi trong quá trình OCR: {e}")
+            return []
+        
+
+
+    # def extract_text_from_pdf(pdf_path,output_file, poppler_path=None):
+    #     try:
+    #         images = convert_from_path(pdf_path,dpi = 300, poppler_path=poppler_path)
+    #         total_pages = len(images)
+            
+    #         print(f"--- Đang xử lý file: {os.path.basename(pdf_path)} ---")
+            
+    #         with open(output_file, "w", encoding="utf-8") as f:
+    #             for i, image in enumerate(images):
+    #                 # OCR trang hiện tại
+    #                 text = pytesseract.image_to_string(image, lang='eng')
+    #                 text = clean_and_filter_text(text)
+
+    #                 # Ghi 
+    #                 f.write(f"\n--- PAGE {i+1} ---\n")
+    #                 f.write(text)
+    #                 f.flush()
+                    
+    #                 image.close()
+                    
+    #                 print(f"Đã ghi xong trang {i+1}/{total_pages} vào {os.path.basename(output_file)}")
+                    
+    #         return True
+    #     except Exception as e:
+    #         print(f"Lỗi: {e}")
+    #         return False
+
+
+
 
 if __name__ == "__main__":
     # Test 
-    test_pdf = os.path.join(project_root, "data", "raw", "test2.pdf")
+    # test_pdf = os.path.join(project_root, "data", "raw", "test2.pdf")
     
-    if os.path.exists(test_pdf):
-        success = extract_text_from_pdf(test_pdf, OUTPUT_PATH, poppler_path=POPPLER_BIN)
-        if success:
-            print(f"\n✅ Hoàn thành! Kết quả nằm tại: {OUTPUT_PATH}")
-    else:
-        print("Vui lòng bỏ file PDF vào data/raw/ để test!")
+    # if os.path.exists(test_pdf):
+    #     success = extract_text_from_pdf(test_pdf, OUTPUT_PATH, poppler_path=POPPLER_BIN)
+    #     if success:
+    #         print(f"\n✅ Hoàn thành! Kết quả nằm tại: {OUTPUT_PATH}")
+    # else:
+    #     print("Vui lòng bỏ file PDF vào data/raw/ để test!")
+
+
+    test_pdf = os.path.join(project_root, "data", "raw", "test2.pdf")
+    engine = OCR_Engine()
+    raw_results = engine.extract_raw_text(test_pdf)
+    
+    # Lưu tạm ra file raw để kiểm tra (không filter)
+    output_raw = os.path.join(project_root, 'output', 'raw_dump.txt')
+    with open(output_raw, "w", encoding="utf-8") as f:
+        for page in raw_results:
+            f.write(f"\n--- PAGE {page['page']} ---\n")
+            f.write(page['content'])
+    
+    print(f"✅ Đã trích xuất xong văn bản thô tại: {output_raw}")
