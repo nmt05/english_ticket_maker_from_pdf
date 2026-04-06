@@ -47,11 +47,12 @@ class OCR_Engine:
             pages_to_process = list(enumerate(images))
             
             if len(pages_to_process) < 10:
+                results = []
                 for i, image in enumerate(images):
                     # Lấy text thô, không filter để giữ ngữ cảnh câu
                     text = pytesseract.image_to_string(image, lang='eng')
                     
-                    extracted_data.append({
+                    results.append({
                         "page": i + 1,
                         "content": text.strip()
                     })
@@ -60,8 +61,9 @@ class OCR_Engine:
                     print(f"Đã xử lý xong trang {i+1}/{len(images)}")
 
 
-            with ProcessPoolExecutor(max_workers=6) as executor:
-                results = list(executor.map(ocr_single_page, pages_to_process))
+            else:
+                with ProcessPoolExecutor(max_workers=6) as executor:
+                    results = list(executor.map(ocr_single_page, pages_to_process))
             
             # Sắp xếp lại kết quả theo đúng thứ tự trang (vì chạy song song có thể trả về xáo trộn)
             extracted_data = sorted(results, key=lambda x: x['page'])
@@ -118,12 +120,12 @@ if __name__ == "__main__":
     #     print("Vui lòng bỏ file PDF vào data/raw/ để test!")
 
 
-    test_pdf = os.path.join(project_root, "data", "raw", "test2.pdf")
+    test_pdf = os.path.join(project_root, "data", "raw", "test4.pdf")
     engine = OCR_Engine()
     raw_results = engine.extract_raw_text(test_pdf)
     
     # Lưu tạm ra file raw để kiểm tra (không filter)
-    output_raw = os.path.join(project_root, 'output', 'raw_dump.txt')
+    output_raw = os.path.join(project_root, 'output', 'test_raw_dump.txt')
     with open(output_raw, "w", encoding="utf-8") as f:
         for page in raw_results:
             f.write(f"\n--- PAGE {page['page']} ---\n")
